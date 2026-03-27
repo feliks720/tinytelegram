@@ -29,8 +29,11 @@ services:
     build: ./gateway
     environment:
       - REDIS_ADDR=redis:6379
-      - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram
+      - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram?sslmode=disable
       - PORT=8081
+      - GATEWAY_ADDR=gateway1:8081
+    ports:
+      - "8081:8081"
     depends_on:
       - redis
       - postgres
@@ -39,8 +42,11 @@ services:
     build: ./gateway
     environment:
       - REDIS_ADDR=redis:6379
-      - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram
+      - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram?sslmode=disable
       - PORT=8082
+      - GATEWAY_ADDR=gateway2:8082
+    ports:
+      - "8082:8082"
     depends_on:
       - redis
       - postgres
@@ -49,8 +55,10 @@ services:
     build: ./message-service
     environment:
       - REDIS_ADDR=redis:6379
-      - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram
+      - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram?sslmode=disable
       - PORT=9090
+    ports:
+      - "9090:9090"
     depends_on:
       - redis
       - postgres

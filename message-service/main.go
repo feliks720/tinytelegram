@@ -6,9 +6,13 @@ import (
 	"os"
 
 	"tinytelegram/message-service/handler"
+	"tinytelegram/message-service/store"
 )
 
 func main() {
+	store.InitRedis()
+	store.InitPostgres()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "9090"
