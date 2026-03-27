@@ -1,0 +1,13 @@
+# Go
+*.exe
+*.out
+bin/
+vendor/
+
+# Env
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
