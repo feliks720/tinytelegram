@@ -13,3 +13,14 @@ vendor/
 .vscode/
 scripts/results.json
 scripts/bottleneck_results.json
+
+# Plans
+docs/plans/
+
+# SSH keys
+.ssh-key-*
+*.pem
+
+# Large experiment CSV files
+results/**/*.csv
+results/**/run_all.log

@@ -11,13 +11,12 @@ import (
 	"google.golang.org/grpc"
 )
 
-// ConnRegistry tracks active WebSocket connections
 var (
-	connMu    sync.RWMutex
-	connMap   = make(map[string]chan *pb.RouteMessageRequest)
+	connMu  sync.RWMutex
+	connMap = make(map[string]chan *pb.PersistedMessage)
 )
 
-func RegisterConn(userID string, ch chan *pb.RouteMessageRequest) {
+func RegisterConn(userID string, ch chan *pb.PersistedMessage) {
 	connMu.Lock()
 	defer connMu.Unlock()
 	connMap[userID] = ch
@@ -26,37 +25,62 @@ func RegisterConn(userID string, ch chan *pb.RouteMessageRequest) {
 func UnregisterConn(userID string) {
 	connMu.Lock()
 	defer connMu.Unlock()
-	delete(connMap, userID)
+	if ch, ok := connMap[userID]; ok {
+		close(ch)
+		delete(connMap, userID)
+	}
+}
+
+func ConnCount() int {
+	connMu.RLock()
+	defer connMu.RUnlock()
+	return len(connMap)
+}
+
+func DeliverLocal(receiverID string, msg *pb.PersistedMessage) bool {
+	connMu.RLock()
+	ch, ok := connMap[receiverID]
+	connMu.RUnlock()
+	if !ok {
+		return false
+	}
+
+	select {
+	case ch <- msg:
+		return true
+	default:
+		return false
+	}
 }
 
 type gatewayServer struct {
 	pb.UnimplementedGatewayServiceServer
 }
 
-func (s *gatewayServer) RouteMessage(ctx context.Context, req *pb.RouteMessageRequest) (*pb.RouteMessageResponse, error) {
-	connMu.RLock()
-	ch, ok := connMap[req.ReceiverId]
-	connMu.RUnlock()
-
-	if !ok {
-		return &pb.RouteMessageResponse{Delivered: false}, nil
+func (s *gatewayServer) DeliverMessage(ctx context.Context, msg *pb.PersistedMessage) (*pb.DeliveryAck, error) {
+	if msg.GetMessage() == nil {
+		return &pb.DeliveryAck{Delivered: false}, nil
 	}
 
-	ch <- req
-	return &pb.RouteMessageResponse{Delivered: true}, nil
+	if DeliverLocal(msg.Message.ReceiverId, msg) {
+		return &pb.DeliveryAck{Delivered: true}, nil
+	}
+
+	log.Printf("No active connection for user %s", msg.Message.ReceiverId)
+	return &pb.DeliveryAck{Delivered: false}, nil
 }
 
 func StartGRPCServer(port string) {
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatalf("gRPC listen error: %v", err)
+		log.Fatalf("Gateway gRPC listen error: %v", err)
 	}
 
-	s := grpc.NewServer()
-	pb.RegisterGatewayServiceServer(s, &gatewayServer{})
+	server := grpc.NewServer()
+	pb.RegisterGatewayServiceServer(server, &gatewayServer{})
 
-	log.Printf("gRPC server starting on port %s", port)
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("gRPC serve error: %v", err)
+	log.Printf("Gateway gRPC server starting on port %s", port)
+	if err := server.Serve(lis); err != nil {
+		log.Fatalf("Gateway gRPC serve error: %v", err)
 	}
 }

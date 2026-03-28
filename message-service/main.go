@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	mgrpc "tinytelegram/message-service/grpc"
 	"tinytelegram/message-service/handler"
 	"tinytelegram/message-service/store"
 )
@@ -12,7 +13,13 @@ import (
 func main() {
 	store.InitRedis()
 	store.InitPostgres()
-	handler.InitGatewayClients()
+	mgrpc.DiscoverGateways(store.RDB)
+
+	grpcPort := os.Getenv("GRPC_PORT")
+	if grpcPort == "" {
+		grpcPort = "5050"
+	}
+	go mgrpc.StartGRPCServer(grpcPort)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -21,10 +28,8 @@ func main() {
 
 	http.HandleFunc("/health", handler.HealthHandler)
 	http.HandleFunc("/redis-only", handler.RedisOnlyHandler)
-	http.HandleFunc("/message", handler.SendMessageHandler)
-	http.HandleFunc("/diff", handler.GetDiffHandler)
 
-	log.Printf("Message service starting on port %s", port)
+	log.Printf("Message service HTTP on :%s, gRPC on :%s", port, grpcPort)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
