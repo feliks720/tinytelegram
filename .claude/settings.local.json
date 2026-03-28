@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /c/workspace/CS6650/project/tinytelegram/results)",
+      "Bash(mv /c/workspace/CS6650/project/tinytelegram/scripts/*.png /c/workspace/CS6650/project/tinytelegram/results/)",
+      "Bash(mv /c/workspace/CS6650/project/tinytelegram/scripts/plot_*.py /c/workspace/CS6650/project/tinytelegram/scripts/experiment2/)",
+      "Bash(mv /c/workspace/CS6650/project/tinytelegram/results/*.png /c/workspace/CS6650/project/tinytelegram/results/experiment2/)"
+    ]
+  }
+}
