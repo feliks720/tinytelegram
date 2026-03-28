@@ -30,3 +30,8 @@ func InitRedis() {
 func NextPTS() (int64, error) {
 	return RDB.Incr(context.Background(), "global:pts").Result()
 }
+
+func GetUserGateway(userID string) (string, error) {
+	key := "presence:" + userID
+	return RDB.Get(context.Background(), key).Result()
+}

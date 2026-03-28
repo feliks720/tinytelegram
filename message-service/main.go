@@ -12,6 +12,7 @@ import (
 func main() {
 	store.InitRedis()
 	store.InitPostgres()
+	handler.InitGatewayClients()
 
 	port := os.Getenv("PORT")
 	if port == "" {

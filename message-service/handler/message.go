@@ -3,9 +3,14 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
+	mgrpc "tinytelegram/message-service/grpc"
+	pb "tinytelegram/message-service/proto"
 	"tinytelegram/message-service/store"
 )
 
@@ -18,6 +23,16 @@ type Message struct {
 type MessageResponse struct {
 	PTS    int64  `json:"pts"`
 	Status string `json:"status"`
+}
+
+func InitGatewayClients() {
+	addrs := os.Getenv("GATEWAY_GRPC_ADDRS")
+	if addrs == "" {
+		return
+	}
+	for _, addr := range strings.Split(addrs, ",") {
+		mgrpc.RegisterGateway(strings.TrimSpace(addr))
+	}
 }
 
 func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
@@ -45,6 +60,22 @@ func SendMessageHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "failed to persist message", http.StatusInternalServerError)
 		return
+	}
+
+	// look up which gateway the receiver is on
+	gatewayAddr, err := store.GetUserGateway(msg.ReceiverID)
+	if err == nil && gatewayAddr != "" {
+		delivered, err := mgrpc.RouteMessage(gatewayAddr, &pb.RouteMessageRequest{
+			SenderId:   msg.SenderID,
+			ReceiverId: msg.ReceiverID,
+			Content:    msg.Content,
+			Pts:        pts,
+		})
+		if err != nil {
+			log.Printf("gRPC route error: %v", err)
+		} else if delivered {
+			log.Printf("Message delivered to %s via %s", msg.ReceiverID, gatewayAddr)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

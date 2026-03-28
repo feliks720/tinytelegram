@@ -9,6 +9,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tt_user -d tinytelegram"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
@@ -29,11 +34,12 @@ services:
     build: ./gateway
     environment:
       - REDIS_ADDR=redis:6379
-      - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram?sslmode=disable
       - PORT=8081
+      - GRPC_PORT=9000
       - GATEWAY_ADDR=gateway1:8081
     ports:
       - "8081:8081"
+      - "9001:9000"
     depends_on:
       - redis
       - postgres
@@ -42,11 +48,12 @@ services:
     build: ./gateway
     environment:
       - REDIS_ADDR=redis:6379
-      - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram?sslmode=disable
       - PORT=8082
+      - GRPC_PORT=9000
       - GATEWAY_ADDR=gateway2:8082
     ports:
       - "8082:8082"
+      - "9002:9000"
     depends_on:
       - redis
       - postgres
@@ -57,11 +64,14 @@ services:
       - REDIS_ADDR=redis:6379
       - POSTGRES_DSN=postgres://tt_user:tt_pass@postgres:5432/tinytelegram?sslmode=disable
       - PORT=9090
+      - GATEWAY_GRPC_ADDRS=gateway1:9000,gateway2:9000
     ports:
       - "9090:9090"
     depends_on:
-      - redis
-      - postgres
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
 volumes:
   postgres_data:

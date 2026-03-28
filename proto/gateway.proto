@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package gateway;
+
+option go_package = "tinytelegram/proto";
+
+service GatewayService {
+  rpc RouteMessage(RouteMessageRequest) returns (RouteMessageResponse);
+}
+
+message RouteMessageRequest {
+  string receiver_id = 1;
+  string sender_id = 2;
+  string content = 3;
+  int64 pts = 4;
+}
+
+message RouteMessageResponse {
+  bool delivered = 1;
+}
