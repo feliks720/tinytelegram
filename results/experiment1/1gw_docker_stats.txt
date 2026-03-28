@@ -1,0 +1,6 @@
+NAME                      CPU %     MEM USAGE / LIMIT
+infra-nginx-1             0.00%     56.9MiB / 15.19GiB
+infra-message-service-1   0.00%     3.617MiB / 15.19GiB
+infra-gateway1-1          0.02%     109.5MiB / 15.19GiB
+infra-postgres-1          0.00%     38.61MiB / 15.19GiB
+infra-redis-1             0.17%     5.523MiB / 15.19GiB

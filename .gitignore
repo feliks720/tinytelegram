@@ -13,3 +13,17 @@ vendor/
 .vscode/
 scripts/results.json
 scripts/bottleneck_results.json
+
+# Plans
+docs/plans/
+
+# SSH keys
+.ssh-key-*
+*.pem
+
+# Large k6 CSV output and logs
+results/**/*_k6.csv
+results/**/run_all.log
+
+# Claude setting
+.claude/

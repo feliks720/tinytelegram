@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 
@@ -27,8 +28,18 @@ func InitRedis() {
 	log.Println("Redis connected")
 }
 
-func NextPTS() (int64, error) {
-	return RDB.Incr(context.Background(), "global:pts").Result()
+func NextUserPTS(userID string) (int64, error) {
+	key := fmt.Sprintf("user:%s:pts", userID)
+	return RDB.Incr(context.Background(), key).Result()
+}
+
+func GetUserPTS(userID string) (int64, error) {
+	key := fmt.Sprintf("user:%s:pts", userID)
+	val, err := RDB.Get(context.Background(), key).Int64()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	return val, err
 }
 
 func GetUserGateway(userID string) (string, error) {

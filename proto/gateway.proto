@@ -1,20 +1,53 @@
 syntax = "proto3";
 
-package gateway;
+package tinytelegram;
 
 option go_package = "tinytelegram/proto";
 
 service GatewayService {
-  rpc RouteMessage(RouteMessageRequest) returns (RouteMessageResponse);
+  rpc DeliverMessage(PersistedMessage) returns (DeliveryAck);
 }
 
-message RouteMessageRequest {
-  string receiver_id = 1;
-  string sender_id = 2;
+service MessageService {
+  rpc PersistMessage(ChatMessage) returns (PersistedMessage);
+  rpc GetDiff(GetDiffRequest) returns (GetDiffResponse);
+  rpc GetUserPts(PtsRequest) returns (PtsResponse);
+}
+
+message ChatMessage {
+  string sender_id = 1;
+  string receiver_id = 2;
   string content = 3;
-  int64 pts = 4;
+  int64 client_timestamp = 4;
 }
 
-message RouteMessageResponse {
+message PersistedMessage {
+  string id = 1;
+  ChatMessage message = 2;
+  int64 receiver_pts = 3;
+  int64 sender_pts = 4;
+  int64 server_timestamp = 5;
+}
+
+message DeliveryAck {
   bool delivered = 1;
+}
+
+message GetDiffRequest {
+  string user_id = 1;
+  int64 client_pts = 2;
+  int32 limit = 3;
+}
+
+message GetDiffResponse {
+  repeated PersistedMessage messages = 1;
+  int64 current_pts = 2;
+}
+
+message PtsRequest {
+  string user_id = 1;
+}
+
+message PtsResponse {
+  int64 pts = 1;
 }
