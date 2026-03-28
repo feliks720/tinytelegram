@@ -11,3 +11,4 @@ vendor/
 # IDE
 .idea/
 .vscode/
+scripts/results.json
