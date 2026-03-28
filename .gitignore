@@ -12,3 +12,4 @@ vendor/
 .idea/
 .vscode/
 scripts/results.json
+scripts/bottleneck_results.json

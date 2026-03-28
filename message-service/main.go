@@ -20,6 +20,7 @@ func main() {
 	}
 
 	http.HandleFunc("/health", handler.HealthHandler)
+	http.HandleFunc("/redis-only", handler.RedisOnlyHandler)
 	http.HandleFunc("/message", handler.SendMessageHandler)
 	http.HandleFunc("/diff", handler.GetDiffHandler)
 
