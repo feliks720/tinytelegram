@@ -32,3 +32,6 @@ results/**/run_all.log
 *.keynote
 *.pdf
 2min_video
+
+# Large k6 JSON files (over 100MB)
+results/**/*.json
