@@ -86,3 +86,20 @@ When reconnecting, clients call `getDiff(local_pts)` to fetch all messages with 
 - E2E encryption
 - Group chats
 - File sharing
+
+## Hosting
+
+**Cloud deployment (Plan 2 — S3 + CloudFront):**
+Contents of `public/` are uploaded directly to S3 and served through CloudFront.
+`server.js` is NOT deployed to AWS. The production URL is the CloudFront domain
+(e.g., `https://dXXXXX.cloudfront.net`).
+
+**Local development:**
+`npm run start:local` runs `server.js` on port 3000 for quick local iteration.
+`npm run verify:static` serves `public/` through a neutral static server on port
+3001 — use this to confirm the files work outside of `server.js` (i.e., will
+work on S3/CloudFront).
+
+**Configuring the WebSocket endpoint:**
+The UI prompts for a "Gateway URL" (see `public/index.html` login screen).
+Enter the ALB WebSocket endpoint, e.g., `wss://<alb-dns>/ws`.
