@@ -2,11 +2,19 @@ package store
 
 import (
 	"database/sql"
+	"embed"
+	"fmt"
+	"io/fs"
 	"log"
 	"os"
+	"sort"
+	"strings"
 
 	_ "github.com/lib/pq"
 )
+
+//go:embed migrations/*.sql
+var migrationFS embed.FS
 
 var DB *sql.DB
 
@@ -21,38 +29,37 @@ func InitPostgres() {
 	if err != nil {
 		log.Fatalf("Postgres open error: %v", err)
 	}
-
 	if err = DB.Ping(); err != nil {
 		log.Fatalf("Postgres connection failed: %v", err)
 	}
-
-	if err = migrate(); err != nil {
+	if err = runMigrations(); err != nil {
 		log.Fatalf("Migration failed: %v", err)
 	}
-
 	log.Println("Postgres connected")
 }
 
-func migrate() error {
-	_, _ = DB.Exec(`DROP TABLE IF EXISTS messages`)
+func runMigrations() error {
+	entries, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("read migrations dir: %w", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sql") {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
 
-	_, err := DB.Exec(`
-		CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
-		CREATE TABLE IF NOT EXISTS messages (
-			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-			sender_id    TEXT NOT NULL,
-			receiver_id  TEXT NOT NULL,
-			content      TEXT NOT NULL,
-			sender_pts   BIGINT NOT NULL,
-			receiver_pts BIGINT NOT NULL,
-			created_at   TIMESTAMPTZ DEFAULT NOW()
-		);
-
-		CREATE INDEX IF NOT EXISTS idx_messages_receiver_pts
-			ON messages(receiver_id, receiver_pts);
-		CREATE INDEX IF NOT EXISTS idx_messages_sender_pts
-			ON messages(sender_id, sender_pts);
-	`)
-	return err
+	for _, name := range names {
+		content, err := fs.ReadFile(migrationFS, "migrations/"+name)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		if _, err := DB.Exec(string(content)); err != nil {
+			return fmt.Errorf("exec %s: %w", name, err)
+		}
+		log.Printf("Applied migration: %s", name)
+	}
+	return nil
 }
