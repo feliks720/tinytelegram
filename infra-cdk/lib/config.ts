@@ -13,6 +13,14 @@ export interface TtConfig {
   readonly cacheNodeType: string;      // 'cache.m6g.large'
   readonly cacheNumReplicas: number;   // 1
   readonly cacheEngineVersion: string; // '7.1'
+  // ECS compute
+  readonly gatewayDesiredCount: number;   // 2 (one per AZ)
+  readonly msgsvcDesiredCount: number;    // 1 (demo-only override)
+  readonly albIdleTimeoutSec: number;     // 3600
+  readonly taskCpu: number;               // 1024  (1 vCPU)
+  readonly taskMemoryMb: number;          // 2048  (2 GB)
+  // ECR
+  readonly imageTag: string;              // 'latest'  (build-push.sh overrides per deploy)
 }
 
 // Single source of truth for environment config. Hard-coded rather than
@@ -29,4 +37,10 @@ export const ttConfig: TtConfig = {
   cacheNodeType: 'cache.m6g.large',
   cacheNumReplicas: 1,
   cacheEngineVersion: '7.1',
+  gatewayDesiredCount: 2,
+  msgsvcDesiredCount: 1,
+  albIdleTimeoutSec: 3600,
+  taskCpu: 1024,
+  taskMemoryMb: 2048,
+  imageTag: 'latest',
 };
