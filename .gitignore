@@ -2,6 +2,7 @@
 *.exe
 *.out
 bin/
+!infra-cdk/bin/
 vendor/
 
 # Env
@@ -35,3 +36,9 @@ results/**/run_all.log
 
 # Large k6 JSON files (over 100MB)
 results/**/*.json
+
+# CDK
+infra-cdk/cdk.out/
+infra-cdk/node_modules/
+infra-cdk/*.js
+infra-cdk/*.d.ts
