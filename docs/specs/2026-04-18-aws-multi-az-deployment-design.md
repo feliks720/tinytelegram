@@ -412,3 +412,70 @@ This design is considered complete when:
 4. Q2 from §9 (IAM permission verification) is resolved before Phase 4 begins. (Q1 is already decided as of this revision.)
 
 After acceptance, the next step is invoking the `writing-plans` skill to produce a detailed implementation plan per-phase.
+
+---
+
+## 11. Phase 1 completion notes + Plan 2 kickoff (2026-04-18)
+
+Plan 1 (app layer + VPC + data stack + local-to-cloud validation) landed on branch `claude/determined-kowalevski-0ef290`, 17 commits (`38a2e9c` → `c6dfee9`). Keep this section short — it exists so a fresh Claude session can pick up where we left off without re-reading the transcript.
+
+### 11.1 Deployed AWS resources (still running; Plan 2 depends on these)
+
+| Stack | Status | Key outputs |
+|---|---|---|
+| `TtVpcStack` (us-east-1) | CREATE_COMPLETE | `vpc-0a883bd3d1ff648a7`, 10.20.0.0/16, AZs 1a+1b, 2 NAT gateways, interface endpoints for ECR / SSM / Secrets Manager / Logs, S3 gateway endpoint |
+| `TtDataStack` | CREATE_COMPLETE | RDS Postgres 16.3 Multi-AZ (`db.m6g.large`, 100 GB gp3), ElastiCache Redis 7.1 Multi-AZ (`cache.m6g.large`, transit+at-rest encryption, AUTH), security groups DbSg / RedisSg / AppSg pre-wired |
+| `TtBastionStack` | destroyed (Task 15) | was only for Phase 1 tunnel; removed after exit criteria met |
+
+Secrets in Secrets Manager: `tinytelegram/db` (RDS master creds, JSON with `password`), `tinytelegram/redis` (ElastiCache AUTH token, JSON with `token`).
+
+### 11.2 Phase 1 exit-criteria results
+
+- (a) 10-min k6 against cloud data plane via bastion tunnel: **0 PTS duplicates** (receiver_pts and sender_pts UNIQUE constraints held). Throughput capped at ~12 msg/s vs 50 msg/s target due to tunnel RTT inflating `WAIT 100ms` timeouts; Fargate in-VPC will restore full throughput. Gaps in receiver_pts represent intentional CP-reject writes (Layer 1 doing its job), not duplicates.
+- (b) mid-run msgsvc kill: **3s downtime** (target ≤ 10s), 0 duplicates. k6 WebSocket sessions survived the restart.
+- Integration test `TestPersistMessage_DuplicatePTSReturnsUnavailable` **PASSes** against cloud Redis + RDS.
+
+### 11.3 Non-obvious gotchas hit during Plan 1 (do NOT re-learn)
+
+1. **CDK dynamic-reference for ElastiCache AuthToken must be a literal string.** `secret.secretValueFromJson().unsafeUnwrap()` synthesizes via `Fn::Join`; CloudFormation does not re-evaluate the resulting string as a dynamic reference and ElastiCache rejects with "Invalid AuthToken". Fix: `cdk.SecretValue.secretsManager('<literal-name>', { jsonField: 'token' }).unsafeUnwrap()` plus an explicit `this.redisGroup.node.addDependency(this.redisAuth)` (CDK can't infer the dep from a literal string). See [data-stack.ts:104](../../infra-cdk/lib/data-stack.ts).
+2. **SG ingress rule descriptions are ASCII-only.** EC2 validates against `[a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*]`. Unicode arrows (`→`) break deploy with a generic "Invalid rule description" error.
+3. **CDK `--profile` does NOT propagate creds to CDK's SDK subprocess on Windows+SSO.** Use `eval "$(aws configure export-credentials --profile $AWS_PROFILE --format env)"` before `npx cdk deploy`.
+4. **AWS CLI default region ≠ CDK region.** The SSO profile defaults to `us-west-2`; CDK deploys to `us-east-1`. Always pass `--region us-east-1` or set `AWS_REGION` on raw CLI calls.
+5. **SSM port-forward tunnels bind IPv4 only.** On Windows, `localhost` resolves to IPv6 `::1` and fails silently with a connection timeout. Always use `127.0.0.1` in DSNs/endpoints when going through a tunnel.
+6. **ElastiCache TLS cert is for the real ElastiCache hostname** — SNI fails when connecting via `127.0.0.1` through a tunnel. `REDIS_TLS_INSECURE=true` gates `tls.Config{InsecureSkipVerify}` for the tunneled path only; Fargate in-VPC leaves it strict.
+7. **Gateway had a pre-existing `concurrent write to websocket connection` panic** surfacing only at ≥ 5 concurrent users. Fixed in `3785318` with a `sync.Mutex` around `conn.WriteJSON` calls.
+8. **AWS Session Manager Plugin must be on PATH** in the shell that runs `aws ssm start-session`. Installed at `/c/Program Files/Amazon/SessionManagerPlugin/bin/`; AWS CLI won't auto-discover.
+
+### 11.4 Plan 2 scope (compute + edge)
+
+Plan 2 produces a working Fargate deployment: message-service + gateway as ECS services behind an ALB, web client behind S3 + CloudFront.
+
+**New stacks:**
+- `TtEcrStack` — one ECR repo per image (`tt-msgsvc`, `tt-gw`). Keep small; `cdk deploy` is the only create path; no lifecycle policies yet.
+- `TtComputeStack` — ECS cluster, Fargate task defs for msgsvc (1 vCPU / 2 GB) and gateway (1 vCPU / 2 GB minimum), services with desired-count ≥ 2 per AZ, attached to `appSg` exported from `TtDataStack`. Service Connect for msgsvc ↔ gateway gRPC discovery (per decision D7 in §3).
+- `TtEdgeStack` — ALB in public subnets fronting the gateway (WebSocket-capable, no consistent hashing — D6 explicitly non-sticky), ACM cert + Route 53 if we commit a domain, else use the ALB DNS name. S3 bucket for web client + CloudFront distribution; web client built for `wss://<gateway>/ws`.
+
+**Code changes expected in Plan 2:**
+- `message-service/Dockerfile` + `gateway/Dockerfile` already exist; will likely need multi-stage tweak for smaller runtime images.
+- `scripts/cloud-integration/*.sh` will be adapted: bastion-based tunneling replaced by ECS Exec into a Fargate task for debugging; k6 targets move from `localhost:8080` to the ALB DNS.
+- Remove `REDIS_TLS_INSECURE=true` from any committed task-def env; Fargate runs in-VPC so SNI matches.
+- Drop the `docker-compose.yml` "nginx" front-door in favor of the ALB; keep compose for local-dev iteration only.
+
+**Open questions for Plan 2 brainstorming:**
+- `Q3`: Domain name? If yes, which registrar, and is ACM email validation OK for a school project? If no, accept ALB DNS directly (ugly but zero-cost).
+- `Q4`: Service Connect vs. simple Cloud Map DNS vs. peering via the existing Redis presence list? Current gateway mesh uses Redis-based discovery (see `gateway/main.go` `RegisterGateway`); decide whether to keep that or let AWS Service Connect replace it entirely.
+- `Q5`: Where does the web client get build-time config for the gateway URL? Env at build, or runtime config.json served from S3?
+- `Q6`: Task-count target — do we need auto-scaling in Phase 2, or fixed count (e.g., 2 per service per AZ = 4 total) is enough to show HA in experiments?
+
+**Phase 2 exit criteria** (from §8):
+- All 3 stacks deploy cleanly end-to-end via `cdk deploy --all`
+- k6 from the laptop against the ALB sustains 50 msg/s for 10 min with 0 PTS duplicates (the actual target throughput the tunnel couldn't hit)
+- Web client in a browser connects through CloudFront → ALB → gateway and exchanges a message round-trip
+- ECS task kill test (kill one msgsvc task) recovers via Fargate replacement in < 60s without loss
+
+### 11.5 How to resume in a fresh session
+
+1. `cd` into the repo on `main` (after this branch is merged) or stay on `claude/determined-kowalevski-0ef290`.
+2. Invoke the `superpowers:brainstorming` skill and answer Q3–Q6 above.
+3. Or invoke `superpowers:writing-plans` directly — the design is stable; only the open questions need resolving before the plan can be written. Save the plan to `docs/plans/2026-04-18-tinytelegram-aws-compute-edge.md` (gitignored, per user preference).
+4. Execute the resulting plan with `superpowers:subagent-driven-development`, same pattern as Plan 1.
