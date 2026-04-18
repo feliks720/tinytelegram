@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	ggrpc "tinytelegram/gateway/grpc"
@@ -58,6 +59,16 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	msgCh := make(chan *pb.PersistedMessage, 64)
 	ggrpc.RegisterConn(userID, msgCh)
 
+	// gorilla/websocket requires writes to a single conn to be serialized.
+	// Both the inbound-delivery goroutine and the main read loop (for acks)
+	// write to this conn, so wrap WriteJSON behind a mutex.
+	var writeMu sync.Mutex
+	writeJSON := func(v any) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return conn.WriteJSON(v)
+	}
+
 	defer func() {
 		stopHeartbeat()
 		ggrpc.UnregisterConn(userID)
@@ -69,7 +80,7 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		for msg := range msgCh {
-			if err := conn.WriteJSON(msg); err != nil {
+			if err := writeJSON(msg); err != nil {
 				log.Printf("Write error for user %s: %v", userID, err)
 				return
 			}
@@ -105,7 +116,7 @@ func WebSocketHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := conn.WriteJSON(map[string]any{
+		if err := writeJSON(map[string]any{
 			"type":       "ack",
 			"sender_pts": persisted.SenderPts,
 			"message_id": persisted.Id,
