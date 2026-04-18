@@ -83,6 +83,30 @@ export class DataStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'DbEndpoint', { value: this.dbCluster.dbInstanceEndpointAddress });
     new cdk.CfnOutput(this, 'DbSecretArn', { value: this.dbSecret.secretArn });
 
-    this.redisGroup = undefined as unknown as elasticache.CfnReplicationGroup;  // filled in Task 9
+    const subnetGroup = new elasticache.CfnSubnetGroup(this, 'RedisSubnetGroup', {
+      description: 'tt redis subnets',
+      subnetIds: vpc.isolatedSubnets.map(s => s.subnetId),
+    });
+
+    this.redisGroup = new elasticache.CfnReplicationGroup(this, 'RedisGroup', {
+      replicationGroupDescription: 'tinytelegram',
+      engine: 'redis',
+      engineVersion: cfg.cacheEngineVersion,
+      cacheNodeType: cfg.cacheNodeType,
+      numNodeGroups: 1,
+      replicasPerNodeGroup: cfg.cacheNumReplicas,
+      automaticFailoverEnabled: true,
+      multiAzEnabled: true,
+      cacheSubnetGroupName: subnetGroup.ref,
+      securityGroupIds: [this.redisSg.securityGroupId],
+      transitEncryptionEnabled: true,
+      atRestEncryptionEnabled: true,
+      authToken: this.redisAuth.secretValueFromJson('token').unsafeUnwrap(),
+      snapshotRetentionLimit: 1,
+    });
+    this.redisGroup.addDependency(subnetGroup);
+
+    new cdk.CfnOutput(this, 'RedisPrimaryEndpoint', { value: this.redisGroup.attrPrimaryEndPointAddress });
+    new cdk.CfnOutput(this, 'RedisAuthSecretArn',   { value: this.redisAuth.secretArn });
   }
 }
