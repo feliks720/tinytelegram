@@ -8,6 +8,7 @@ class TinyTelegramClient {
         this.gatewayUrl = null;
         this.localPts = 0;
         this.messages = new Map(); // msgId -> message
+        this.pendingAcks = [];      // tempIds in send-order; acks pop the head
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 5;
         this.reconnectDelay = 2000;
@@ -108,9 +109,24 @@ class TinyTelegramClient {
     }
 
     handleAck(ack) {
-        // Update local PTS for sent message
         if (ack.sender_pts) {
             this.updatePts(ack.sender_pts);
+        }
+        // Server acks arrive in send order, so pop the oldest pending temp
+        // message and reconcile it with the real id + pts.
+        const tempId = this.pendingAcks.shift();
+        if (tempId) {
+            const msg = this.messages.get(tempId);
+            if (msg) {
+                this.messages.delete(tempId);
+                const oldEl = document.getElementById(`msg-${tempId}`);
+                if (oldEl) oldEl.remove();
+                msg.id = ack.message_id;
+                msg.pts = ack.sender_pts;
+                msg.pending = false;
+                this.messages.set(ack.message_id, msg);
+                this.displayMessage(ack.message_id);
+            }
         }
         console.log(`Message ${ack.message_id} acknowledged, pts=${ack.sender_pts}`);
     }
@@ -171,7 +187,7 @@ class TinyTelegramClient {
         this.ws.send(JSON.stringify(message));
 
         // Optimistically display sent message
-        const tempId = `temp_${Date.now()}`;
+        const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         this.messages.set(tempId, {
             id: tempId,
             senderId: this.userId,
@@ -181,6 +197,7 @@ class TinyTelegramClient {
             timestamp: Date.now(),
             pending: true
         });
+        this.pendingAcks.push(tempId);
         this.displayMessage(tempId);
     }
 
