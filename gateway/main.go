@@ -27,6 +27,10 @@ func main() {
 			log.Fatalf("ECS metadata resolution failed: %v", err)
 		}
 		gatewayAddr, grpcAddr = id, addr
+		// Downstream code (handler/websocket.go) reads these via os.Getenv,
+		// so publish the resolved values back into the process env.
+		os.Setenv("GATEWAY_ADDR", gatewayAddr)
+		os.Setenv("GATEWAY_GRPC_ADDR", grpcAddr)
 		log.Printf("ECS self-identity: id=%s grpc=%s", gatewayAddr, grpcAddr)
 	} else if grpcAddr == "" {
 		grpcAddr = gatewayAddr
