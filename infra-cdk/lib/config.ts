@@ -21,6 +21,9 @@ export interface TtConfig {
   readonly taskMemoryMb: number;          // 2048  (2 GB)
   // ECR
   readonly imageTag: string;              // 'latest'  (build-push.sh overrides per deploy)
+  // Data plane (looked up from Plan 1 outputs — hard-coded for clean cdk diff)
+  readonly rdsEndpoint: string;     // e.g. 'tt-db.XXX.us-east-1.rds.amazonaws.com'
+  readonly redisEndpoint: string;   // e.g. 'master.tt-redis.XXX.use1.cache.amazonaws.com'
 }
 
 // Single source of truth for environment config. Hard-coded rather than
@@ -43,4 +46,6 @@ export const ttConfig: TtConfig = {
   taskCpu: 1024,
   taskMemoryMb: 2048,
   imageTag: 'latest',
+  rdsEndpoint: 'ttdatastack-db5d02a0a9-ofiyfeygjttu.cwdiqg4qmai4.us-east-1.rds.amazonaws.com',
+  redisEndpoint: 'master.strxscaadba16nu.intffo.use1.cache.amazonaws.com',
 };
