@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
@@ -13,11 +14,10 @@ export interface ComputeStackProps extends cdk.StackProps {
   readonly cfg: TtConfig;
   readonly vpc: ec2.IVpc;
   readonly appSg: ec2.ISecurityGroup;
+  readonly redisSg: ec2.ISecurityGroup;
 }
 
 export class ComputeStack extends cdk.Stack {
-  // Real ALB DNS is assigned in a later task once the ALB is created;
-  // placeholder here keeps synth green and the EdgeStack wiring typed.
   public readonly albDnsName: string;
 
   public readonly gwRepo: ecr.Repository;
@@ -32,10 +32,12 @@ export class ComputeStack extends cdk.Stack {
   public readonly namespace: servicediscovery.PrivateDnsNamespace;
   public readonly msgsvcService: ecs.FargateService;
 
+  public readonly alb: elbv2.ApplicationLoadBalancer;
+  public readonly gwService: ecs.FargateService;
+
   constructor(scope: Construct, id: string, props: ComputeStackProps) {
     super(scope, id, props);
     const cfg = props.cfg;
-    this.albDnsName = '';  // Task 6 will replace with the real ALB DNS.
 
     this.gwRepo = new ecr.Repository(this, 'GatewayRepo', {
       repositoryName: 'tt-gw',
@@ -147,6 +149,94 @@ export class ComputeStack extends cdk.Stack {
       // Note: Fargate does not support PlacementStrategies. AZ spread is
       // achieved implicitly by ECS Fargate when the service scales across
       // the subnets provided in vpcSubnets (one per AZ).
+    });
+
+    const albSg = new ec2.SecurityGroup(this, 'AlbSg', {
+      vpc: props.vpc, description: 'Public ingress for ALB', allowAllOutbound: true,
+    });
+    albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'http from internet');
+
+    // Gateway sits in its own SG (in ComputeStack) so that the ALB auto-
+    // ingress rule from attachToApplicationTargetGroup, which references
+    // albSg (also in ComputeStack), does not try to attach to appSg (in
+    // DataStack) and pull DataStack -> ComputeStack, creating a cycle.
+    const gwSg = new ec2.SecurityGroup(this, 'GwSg', {
+      vpc: props.vpc, description: 'Gateway tasks SG', allowAllOutbound: true,
+    });
+    gwSg.connections.allowFrom(gwSg, ec2.Port.tcp(9000), 'gateway peer grpc');
+    // Let msgsvc (in appSg/DataStack) accept gRPC from gateway (gwSg/ComputeStack).
+    // Declared in ComputeStack so the rule carries the cross-stack ref in the
+    // right direction.
+    new ec2.CfnSecurityGroupIngress(this, 'AppSgFromGw5050', {
+      groupId: props.appSg.securityGroupId,
+      sourceSecurityGroupId: gwSg.securityGroupId,
+      ipProtocol: 'tcp', fromPort: 5050, toPort: 5050,
+      description: 'gateway to msgsvc grpc',
+    });
+    // Let gateway (gwSg/ComputeStack) reach Redis (redisSg/DataStack).
+    new ec2.CfnSecurityGroupIngress(this, 'RedisSgFromGw6379', {
+      groupId: props.redisSg.securityGroupId,
+      sourceSecurityGroupId: gwSg.securityGroupId,
+      ipProtocol: 'tcp', fromPort: 6379, toPort: 6379,
+      description: 'gateway to redis',
+    });
+
+    this.alb = new elbv2.ApplicationLoadBalancer(this, 'Alb', {
+      vpc: props.vpc, internetFacing: true, securityGroup: albSg,
+      idleTimeout: cdk.Duration.seconds(cfg.albIdleTimeoutSec),
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+    });
+    this.albDnsName = this.alb.loadBalancerDnsName;
+    new cdk.CfnOutput(this, 'AlbDnsName', { value: this.albDnsName });
+
+    const gwTd = new ecs.FargateTaskDefinition(this, 'GwTd', {
+      cpu: cfg.taskCpu, memoryLimitMiB: cfg.taskMemoryMb,
+      executionRole: this.execRole, taskRole: this.taskRole,
+    });
+    // Gateway reads REDIS_AUTH directly, so we can name the injected secret
+    // env var REDIS_AUTH (no wrapper needed like msgsvc).
+    gwTd.addContainer('gateway', {
+      image: ecs.ContainerImage.fromEcrRepository(this.gwRepo, cfg.imageTag),
+      logging: ecs.LogDrivers.awsLogs({ logGroup: this.gwLogs, streamPrefix: 'gw' }),
+      portMappings: [
+        { containerPort: 8080, name: 'http' },
+        { containerPort: 9000, name: 'grpc' },
+      ],
+      environment: {
+        PORT:             '8080',
+        GRPC_PORT:        '9000',
+        MSG_SERVICE_ADDR: 'msgsvc.tt.local:5050',
+        REDIS_ADDR:       `${cfg.redisEndpoint}:6379`,
+        REDIS_TLS:        'true',
+      },
+      secrets: {
+        REDIS_AUTH: ecs.Secret.fromSecretsManager(redisSecret, 'token'),
+      },
+    });
+
+    this.gwService = new ecs.FargateService(this, 'GwService', {
+      cluster: this.cluster,
+      taskDefinition: gwTd,
+      desiredCount: cfg.gatewayDesiredCount,
+      securityGroups: [gwSg],
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      enableExecuteCommand: true,
+    });
+
+    const gwTg = new elbv2.ApplicationTargetGroup(this, 'GwTg', {
+      vpc: props.vpc, port: 8080, protocol: elbv2.ApplicationProtocol.HTTP,
+      targetType: elbv2.TargetType.IP,
+      healthCheck: {
+        path: '/health', interval: cdk.Duration.seconds(10), timeout: cdk.Duration.seconds(5),
+        healthyThresholdCount: 2, unhealthyThresholdCount: 2,
+      },
+      deregistrationDelay: cdk.Duration.seconds(10),
+    });
+    this.gwService.attachToApplicationTargetGroup(gwTg);
+
+    this.alb.addListener('HttpListener', {
+      port: 80, protocol: elbv2.ApplicationProtocol.HTTP,
+      defaultTargetGroups: [gwTg],
     });
   }
 }

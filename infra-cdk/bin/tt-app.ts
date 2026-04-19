@@ -14,7 +14,10 @@ const vpcStack     = new VpcStack(app, 'TtVpcStack', { env, cfg: ttConfig });
 const dataStack    = new DataStack(app, 'TtDataStack', { env, cfg: ttConfig, vpc: vpcStack.vpc });
 dataStack.addDependency(vpcStack);
 
-const computeStack = new ComputeStack(app, 'TtComputeStack', { env, cfg: ttConfig, vpc: vpcStack.vpc, appSg: dataStack.appSg });
+const computeStack = new ComputeStack(app, 'TtComputeStack', {
+  env, cfg: ttConfig, vpc: vpcStack.vpc,
+  appSg: dataStack.appSg, redisSg: dataStack.redisSg,
+});
 computeStack.addDependency(dataStack);
 const edgeStack    = new EdgeStack(app, 'TtEdgeStack', { env, cfg: ttConfig, albDnsName: computeStack.albDnsName });
 edgeStack.addDependency(computeStack);
